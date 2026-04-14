@@ -33,8 +33,6 @@ object Spacing {
     val NavigationRailWidth = 92.dp
     val NavigationRailItemHeight = 68.dp
     val FloatingInset = 12.dp
-    val TopBarInset = 12.dp
-    val TopBarVerticalInset = 6.dp
     val PageOuterInset = 12.dp
     val PageSectionGap = 12.dp
     val PageCardPadding = 12.dp
