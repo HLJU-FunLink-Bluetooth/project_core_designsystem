@@ -38,14 +38,12 @@ fun miSansTextStyles(base: TextStyles = defaultTextStyles()): TextStyles = base.
 @Composable
 fun FunLinkTheme(
     controller: ThemeController,
-    smoothRounding: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     MiuixTheme(
-        controller = controller,
-        textStyles = miSansTextStyles(),
-        smoothRounding = smoothRounding,
-        content = content,
+        controller,
+        miSansTextStyles(),
+        content,
     )
 }
 
