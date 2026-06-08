@@ -276,8 +276,8 @@ fun FloatingBottomBar(
     }
 
     val combinedBackdrop = activeBackdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
-    val baseHighlight = rememberGravityRotatedHighlight(IosIndicatorSpecular, extraDegrees = -45f)
-    val pillHighlight = rememberGravityRotatedHighlight(IosIndicatorSpecular, extraDegrees = 90f)
+    val baseHighlight = rememberIosIndicatorHighlight(extraDegrees = -45f)
+    val pillHighlight = rememberIosIndicatorHighlight(extraDegrees = 90f)
 
     val navBarBottomPadding = WindowInsets.navigationBars
         .only(WindowInsetsSides.Bottom)
@@ -548,7 +548,7 @@ private fun FloatingBottomSideActionButton(
     contentColor: Color,
 ) {
     val shape = CircleShape
-    val highlight = rememberGravityRotatedHighlight(IosIndicatorSpecular, extraDegrees = 30f)
+    val highlight = rememberIosIndicatorHighlight(extraDegrees = 30f)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressProgress by animateFloatAsState(
@@ -642,11 +642,10 @@ private fun FloatingBottomSideActionButton(
 }
 
 @Composable
-private fun rememberGravityRotatedHighlight(
-    base: Highlight,
+private fun rememberIosIndicatorHighlight(
     extraDegrees: Float = 0f,
 ): Highlight {
-    val baseStyle = base.style as BloomStroke
+    val baseStyle = IosIndicatorSpecular.style as BloomStroke
     val tilt by rememberDeviceTilt()
     val rotatedPrimary = remember(tilt, baseStyle.primaryLight, extraDegrees) {
         val basePrimary = baseStyle.primaryLight
@@ -672,7 +671,7 @@ private fun rememberGravityRotatedHighlight(
             ),
         )
     }
-    return remember(base, rotatedPrimary) {
-        base.copy(style = baseStyle.copy(primaryLight = rotatedPrimary))
+    return remember(rotatedPrimary) {
+        IosIndicatorSpecular.copy(style = baseStyle.copy(primaryLight = rotatedPrimary))
     }
 }

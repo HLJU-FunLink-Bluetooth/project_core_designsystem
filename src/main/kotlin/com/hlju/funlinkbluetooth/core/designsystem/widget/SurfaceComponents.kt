@@ -12,10 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import com.hlju.funlinkbluetooth.core.designsystem.token.Corners
 import com.hlju.funlinkbluetooth.core.designsystem.token.Spacing
+import com.hlju.funlinkbluetooth.core.designsystem.token.clipNestedShape
+import com.hlju.funlinkbluetooth.core.designsystem.token.clipPageShape
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -60,7 +60,7 @@ fun StatusBadge(
 ) {
     Box(
         modifier = modifier
-            .clip(Corners.nestedShape())
+            .clipNestedShape()
             .background(toneContainerColor(tone))
             .padding(horizontal = Spacing.MediumPlus, vertical = Spacing.SmallPlus),
         contentAlignment = Alignment.Center
@@ -123,7 +123,7 @@ fun StateMessageCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(Corners.PageShape)
+            .clipPageShape()
     ) {
         Column(
             modifier = Modifier.padding(insidePadding),

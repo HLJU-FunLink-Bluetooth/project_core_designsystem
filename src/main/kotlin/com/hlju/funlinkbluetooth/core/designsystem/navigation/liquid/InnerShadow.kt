@@ -6,7 +6,6 @@ package com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid
 // Adapted from compose-miuix-ui/miuix example and Kyant0/AndroidLiquidGlass (Apache 2.0).
 
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.Stable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
@@ -38,12 +37,7 @@ data class InnerShadow(
     val color: Color = Color.Black.copy(alpha = 0.15f),
     val alpha: Float = 1f,
     val blendMode: BlendMode = DrawScope.DefaultBlendMode,
-) {
-    companion object {
-        @Stable
-        val Default: InnerShadow = InnerShadow()
-    }
-}
+)
 
 fun Modifier.innerShadow(
     shape: Shape,

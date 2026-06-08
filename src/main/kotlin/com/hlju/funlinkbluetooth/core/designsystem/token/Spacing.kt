@@ -22,16 +22,12 @@ object Spacing {
     val Large = 12.dp
     val LargePlus = 14.dp
     val ExtraLarge = 16.dp
-    val ExtraExtraLarge = 20.dp
 
     val IconMedium = 18.dp
     val IconExtraLarge = 36.dp
 
     val DividerInsetStart = 60.dp
-    val BottomTabMinWidth = 76.dp
-    val DashboardReferenceWidth = 180.dp
     val NavigationRailWidth = 92.dp
-    val NavigationRailItemHeight = 68.dp
     val FloatingInset = 12.dp
     val PageOuterInset = 12.dp
     val PageSectionGap = 12.dp

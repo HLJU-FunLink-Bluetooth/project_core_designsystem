@@ -33,6 +33,8 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.highlight.Highlight
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 data class FloatingNavigationRailTab(
@@ -51,8 +53,9 @@ fun FloatingNavigationRail(
 ) {
     val isLight = !isSystemInDarkTheme()
     val activeBackdrop = if (isBlurActive) backdrop else null
-    val containerShape = remember { RoundedCornerShape(30.dp) }
-    val itemShape = remember { RoundedCornerShape(22.dp) }
+    val containerCornerRadius = 30.dp
+    val itemCornerRadius = 22.dp
+    val containerShape = remember { RoundedCornerShape(containerCornerRadius) }
     val containerColor = if (activeBackdrop != null) {
         MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.44f)
     } else {
@@ -84,7 +87,7 @@ fun FloatingNavigationRail(
                         onDrawSurface = { drawRect(containerColor) },
                     )
                 } else {
-                    Modifier.background(containerColor, containerShape)
+                    Modifier.squircleBackground(containerColor, containerCornerRadius)
                 },
             )
             .padding(horizontal = Spacing.Small, vertical = Spacing.PageBase10),
@@ -99,10 +102,9 @@ fun FloatingNavigationRail(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(itemShape)
-                    .background(
-                        if (selected) accent.copy(alpha = 0.14f) else Color.Transparent,
-                        itemShape,
+                    .squircleSurface(
+                        color = if (selected) accent.copy(alpha = 0.14f) else Color.Transparent,
+                        cornerRadius = itemCornerRadius,
                     )
                     .clickable { onSelected(index) }
                     .padding(vertical = Spacing.PageBase10, horizontal = Spacing.SmallPlus),

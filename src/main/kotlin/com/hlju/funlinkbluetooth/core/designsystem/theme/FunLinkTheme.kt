@@ -1,11 +1,13 @@
 package com.hlju.funlinkbluetooth.core.designsystem.theme
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.hlju.funlinkbluetooth.core.designsystem.R
+import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.TextStyles
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -40,11 +42,13 @@ fun FunLinkTheme(
     controller: ThemeController,
     content: @Composable () -> Unit,
 ) {
-    MiuixTheme(
-        controller,
-        miSansTextStyles(),
-        content,
-    )
+    CompositionLocalProvider(LocalSquircleEnabled provides true) {
+        MiuixTheme(
+            controller,
+            miSansTextStyles(),
+            content,
+        )
+    }
 }
 
 private fun TextStyle.withMiSans(): TextStyle = copy(fontFamily = MiSansFontFamily)
