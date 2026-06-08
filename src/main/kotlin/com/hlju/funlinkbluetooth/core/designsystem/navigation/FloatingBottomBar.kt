@@ -41,7 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Alignment.Companion.CenterHorizontally
 import androidx.compose.ui.Modifier
@@ -98,7 +98,7 @@ import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-private val LocalIosTabScale = staticCompositionLocalOf { { 1f } }
+private val LocalIosTabScale = compositionLocalOf { { 1f } }
 
 private val CompactBarScreenPadding = 16.dp
 private val CompactBarTabSlotWidth = 76.dp
