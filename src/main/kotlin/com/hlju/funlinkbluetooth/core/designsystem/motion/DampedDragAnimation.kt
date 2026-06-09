@@ -1,6 +1,7 @@
 package com.hlju.funlinkbluetooth.core.designsystem.motion
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.MutatorMutex
 import androidx.compose.runtime.snapshotFlow
@@ -22,6 +23,9 @@ class DampedDragAnimation(
     visibilityThreshold: Float,
     private val initialScale: Float,
     private val pressedScale: Float,
+    private val pressProgressAnimationSpec: AnimationSpec<Float> = spring(1f, 1000f, 0.001f),
+    private val scaleXAnimationSpec: AnimationSpec<Float> = spring(0.6f, 250f, 0.001f),
+    private val scaleYAnimationSpec: AnimationSpec<Float> = spring(0.7f, 250f, 0.001f),
     private val canDrag: (Offset) -> Boolean = { true },
     private val onDragStarted: DampedDragAnimation.(position: Offset) -> Unit,
     private val onDragStopped: DampedDragAnimation.() -> Unit,
@@ -29,9 +33,6 @@ class DampedDragAnimation(
 ) {
     private val valueAnimationSpec = spring(1f, 1000f, visibilityThreshold)
     private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
-    private val pressProgressAnimationSpec = spring(1f, 1000f, 0.001f)
-    private val scaleXAnimationSpec = spring(0.6f, 250f, 0.001f)
-    private val scaleYAnimationSpec = spring(0.7f, 250f, 0.001f)
 
     private val valueAnimation = Animatable(initialValue, visibilityThreshold)
     private val velocityAnimation = Animatable(0f, 5f)
@@ -119,6 +120,30 @@ class DampedDragAnimation(
                     launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
                 }
                 release()
+            }
+        }
+    }
+
+    suspend fun snapToValue(value: Float) {
+        mutatorMutex.mutate {
+            val targetValue = value.coerceIn(valueRange)
+            valueAnimation.snapTo(targetValue)
+            velocityAnimation.snapTo(0f)
+        }
+    }
+
+    suspend fun animateValueTo(value: Float) {
+        animateValueTo(value, valueAnimationSpec)
+    }
+
+    suspend fun animateValueTo(value: Float, animationSpec: AnimationSpec<Float>) {
+        mutatorMutex.mutate {
+            val targetValue = value.coerceIn(valueRange)
+            valueAnimation.animateTo(targetValue, animationSpec) {
+                updateVelocity()
+            }
+            if (velocity != 0f) {
+                velocityAnimation.animateTo(0f, velocityAnimationSpec)
             }
         }
     }
