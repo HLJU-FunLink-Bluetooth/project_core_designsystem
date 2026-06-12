@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.shadow.Shadow
@@ -83,6 +84,7 @@ import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.InnerShadow
 import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.innerShadow
 import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.lens
 import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.rememberCombinedBackdrop
+import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.unionLens
 import com.hlju.funlinkbluetooth.core.designsystem.navigation.liquid.vibrancy
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
@@ -119,18 +121,19 @@ private val CompactBarScreenPadding = 16.dp
 private val CompactBarTabSlotWidth = 76.dp
 private val CompactBarHeight = 64.dp
 private val CompactBarIndicatorHeight = 56.dp
+private val CompactBarPressedIndicatorHeight = 78.dp
 private val CompactBarPadding = 4.dp
 private val CompactBarIconSize = 22.dp
 private val CompactBarLabelSize = 11.sp
 private val FocusedBarSize = 48.dp
 private val FocusedBarIndicatorHeight = 40.dp
 private val FocusedBarIconSize = 24.dp
-private val FocusPressedIndicatorHeight = 78.dp
 private val SideActionCollapsedWidth = CompactBarHeight
 private val SideActionExpandedWidth = 168.dp
 private val FloatingBarShadowRadius = 10.dp
 private const val FloatingBarShadowAlpha = 0.2f
 private const val FloatingBarPressedShadowAlphaExtra = 0.06f
+private val UnionMaxK = 4.dp
 private val IosIndicatorSpecular: Highlight = Highlight(
     width = 1.dp,
     alpha = 1f,
@@ -285,7 +288,9 @@ fun FloatingBottomBar(
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
-            pressedScale = 78f / 56f,
+            pressedScale = with(density) {
+                CompactBarPressedIndicatorHeight.toPx() / CompactBarIndicatorHeight.toPx().coerceAtLeast(1f)
+            },
             canDrag = { offset ->
                 val anim = holder.instance ?: return@DampedDragAnimation true
                 if (tabWidthPx == 0f) return@DampedDragAnimation false
@@ -327,6 +332,20 @@ fun FloatingBottomBar(
         ).also { holder.instance = it }
     }
     val focusedActionPress = remember(animationScope) {
+        DampedDragAnimation(
+            animationScope = animationScope,
+            initialValue = 0f,
+            valueRange = 0f..1f,
+            visibilityThreshold = 0.001f,
+            initialScale = 1f,
+            pressedScale = 1f,
+            pressProgressAnimationSpec = spring(0.7f, 450f, 0.001f),
+            onDragStarted = {},
+            onDragStopped = {},
+            onDrag = { _, _ -> },
+        )
+    }
+    val sideActionPress = remember(animationScope) {
         DampedDragAnimation(
             animationScope = animationScope,
             initialValue = 0f,
@@ -384,8 +403,17 @@ fun FloatingBottomBar(
         )
     }
 
-    val baseCombinedBackdrop = activeBackdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
-    val combinedBackdrop = baseCombinedBackdrop?.let { rememberCombinedBackdrop(it, sideActionBackdrop) }
+    val focusedTabBackdrop = activeBackdrop?.let { backdrop ->
+        rememberCombinedBackdrop(backdrop, tabsBackdrop)
+    }
+    val unionControlsBackdrop = if (sideAction != null) {
+        rememberCombinedBackdrop(tabsBackdrop, sideActionBackdrop)
+    } else {
+        tabsBackdrop
+    }
+    val unionBackdrop = activeBackdrop?.let { backdrop ->
+        rememberCombinedBackdrop(backdrop, unionControlsBackdrop)
+    }
     val baseHighlight = rememberIosIndicatorHighlight(extraDegrees = -45f)
     val pillHighlight = rememberIosIndicatorHighlight(extraDegrees = 90f)
 
@@ -471,28 +499,182 @@ fun FloatingBottomBar(
             val barHeight = lerpDp(CompactBarHeight, FocusedBarSize, sideActionProgress)
             val indicatorHeight = lerpDp(CompactBarIndicatorHeight, FocusedBarIndicatorHeight, sideActionProgress)
             val actionWidth = lerpDp(collapsedActionWidth, expandedActionWidth, sideActionProgress)
+            val focusMorphProgress = FastOutSlowInEasing.transform(sideActionProgress.coerceIn(0f, 1f))
+            val expandedFocusVisible = !focusTransitionActive
+            val focusPressProgress = if (expandedFocusVisible) dampedDrag.pressProgress else 0f
+            val focusedButtonPressProgress =
+                (focusedActionPress.pressProgress * focusMorphProgress).coerceIn(0f, 1f)
+            val focusedButtonScale = lerp(1f, 78f / 64f, focusedButtonPressProgress)
+            val barShadowAlpha = FloatingBarShadowAlpha +
+                FloatingBarPressedShadowAlphaExtra * maxOf(focusPressProgress, focusedButtonPressProgress)
+            val sideActionPressProgress = sideActionPress.pressProgress
+            val sideActionScale = sideActionButtonScale(sideActionProgress, sideActionPressProgress)
+            val focusContentZ = if (focusPressProgress > 0.01f || focusedButtonPressProgress > 0.01f) 1f else 0f
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(actionGap),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // ── Union effect ──
+            // Disable only during the morphing transition (0 < sideActionProgress < 1),
+            // not after the transition settles — the expanded state should still union.
+            val unionMorphing = sideActionProgress > 0.01f && sideActionProgress < 0.99f
+            val unionPressTarget = if (!unionMorphing && sideAction != null) {
+                maxOf(focusPressProgress, sideActionPressProgress, focusedButtonPressProgress)
+            } else 0f
+            val unionK by animateFloatAsState(
+                targetValue = unionPressTarget * with(density) { UnionMaxK.toPx() },
+                animationSpec = spring(0.7f, 400f, 0.001f),
+                label = "floatingBottomBarUnionK",
+            )
+            val unionVisible = unionK > 0.5f && sideAction != null && activeBackdrop != null
+
+            Box(contentAlignment = Alignment.Center) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(actionGap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(barWidth)
+                            .height(barHeight),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .graphicsLayer { translationX = panelOffset }
+                                .width(barWidth * focusedButtonScale)
+                                .height(barHeight * focusedButtonScale)
+                                .floatingBarShadow(pillShape, barShadowAlpha),
+                        )
+                    }
+                    if (sideAction != null) {
+                        Box(
+                            modifier = Modifier
+                                .width(actionWidth)
+                                .height(barHeight),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(actionWidth * sideActionScale)
+                                    .height(barHeight * sideActionScale)
+                                    .floatingBarShadow(
+                                        shape = pillShape,
+                                        alpha = FloatingBarShadowAlpha +
+                                            FloatingBarPressedShadowAlphaExtra * sideActionPressProgress,
+                                    ),
+                            )
+                        }
+                    }
+                }
+
+                // ── Union neck overlay ──
+                if (unionVisible) {
+                    val totalContentWidth = barWidth + actionGap + actionWidth
+                    val barWidthPx = with(density) { barWidth.toPx() }
+                    val barHeightPx = with(density) { barHeight.toPx() }
+                    val actionWidthPx = with(density) { actionWidth.toPx() }
+                    val actionGapPx = with(density) { actionGap.toPx() }
+                    // The navigation pill can be scaled by the tab press layerBlock
+                    // or by the focused-button press wrapper after the side action expands.
+                    val navigationLayerScale = lerp(
+                        1f,
+                        1f + with(density) { 16.dp.toPx() } / barWidthPx.coerceAtLeast(1f),
+                        focusPressProgress,
+                    )
+                    val navigationVisualScale = navigationLayerScale * focusedButtonScale
+                    val leftHw = barWidthPx / 2f * navigationVisualScale
+                    val leftHh = barHeightPx / 2f * navigationVisualScale
+                    val leftR = barHeightPx / 2f * navigationVisualScale
+                    val rightHw = actionWidthPx / 2f * sideActionScale
+                    val rightHh = barHeightPx / 2f * sideActionScale
+                    val rightR = barHeightPx / 2f * sideActionScale
+                    val overlayHorizontalOutsetPx = maxOf(
+                        (leftHw - barWidthPx / 2f).coerceAtLeast(0f) + abs(panelOffset),
+                        (rightHw - actionWidthPx / 2f).coerceAtLeast(0f),
+                        unionK.coerceAtLeast(0f),
+                    )
+                    val overlayVerticalOutsetPx =
+                        (maxOf(leftHh, rightHh) - barHeightPx / 2f).coerceAtLeast(0f) +
+                            unionK.coerceAtLeast(0f)
+                    val overlayHorizontalOutset = with(density) { overlayHorizontalOutsetPx.toDp() }
+                    val overlayVerticalOutset = with(density) { overlayVerticalOutsetPx.toDp() }
+                    // Coordinates in the overlay Box's local space (width = totalContentWidth)
+                    // panelOffset: the rubber-band offset applied to the tab Row inside the left pill
+                    val leftCx = if (isLtr) {
+                        overlayHorizontalOutsetPx + barWidthPx / 2f + panelOffset
+                    } else {
+                        overlayHorizontalOutsetPx + actionWidthPx + actionGapPx + barWidthPx / 2f + panelOffset
+                    }
+                    val leftCy = overlayVerticalOutsetPx + barHeightPx / 2f
+                    val rightCx = if (isLtr) {
+                        overlayHorizontalOutsetPx + barWidthPx + actionGapPx + actionWidthPx / 2f
+                    } else {
+                        overlayHorizontalOutsetPx + actionWidthPx / 2f
+                    }
+                    val rightCy = overlayVerticalOutsetPx + barHeightPx / 2f
+                    Box(
+                        modifier = Modifier
+                            .width(totalContentWidth)
+                            .height(barHeight)
+                            .zIndex(0.5f),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = -overlayHorizontalOutset,
+                                    y = -overlayVerticalOutset,
+                                )
+                                .width(totalContentWidth + overlayHorizontalOutset * 2f)
+                                .height(barHeight + overlayVerticalOutset * 2f)
+                                .drawBackdrop(
+                                    backdrop = unionBackdrop ?: activeBackdrop,
+                                    shape = { RectangleShape },
+                                    effects = {
+                                        vibrancy()
+                                        blur(4.dp.toPx(), 4.dp.toPx())
+                                        unionLens(
+                                            leftCenter = floatArrayOf(leftCx, leftCy),
+                                            leftHalfSize = floatArrayOf(leftHw, leftHh),
+                                            leftRadius = leftR,
+                                            rightCenter = floatArrayOf(rightCx, rightCy),
+                                            rightHalfSize = floatArrayOf(rightHw, rightHh),
+                                            rightRadius = rightR,
+                                            unionK = unionK,
+                                            refractionHeight = 24.dp.toPx(),
+                                            refractionAmount = 24.dp.toPx(),
+                                            depthEffect = false,
+                                            surfaceColor = containerColor,
+                                        )
+                                    },
+                                    onDrawSurface = {},
+                                ),
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(actionGap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 Box(
                     modifier = Modifier
+                        .zIndex(focusContentZ)
                         .width(barWidth)
-                        .height(barHeight),
+                        .height(barHeight)
+                        .graphicsLayer {
+                            scaleX = focusedButtonScale
+                            scaleY = focusedButtonScale
+                        },
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     CompositionLocalProvider(LocalContentColor provides tabContentColor) {
                         Row(
                             modifier = Modifier
                                 .width(barWidth)
-                                .alpha(fullMenuAlpha)
                                 .onSizeChanged { coords ->
                                     totalWidthPx = coords.width.toFloat()
                                     val contentWidthPx = totalWidthPx - with(density) { 8.dp.toPx() }
                                     tabWidthPx = (contentWidthPx / tabsCount).coerceAtLeast(0f)
                                 }
-                                .offset { IntOffset(panelOffset.roundToInt(), 0) }
+                                .graphicsLayer { translationX = panelOffset }
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -543,7 +725,7 @@ fun FloatingBottomBar(
                                     .clearAndSetSemantics {}
                                     .alpha(0f)
                                     .layerBackdrop(tabsBackdrop)
-                                    .offset { IntOffset(panelOffset.roundToInt(), 0) }
+                                    .graphicsLayer { translationX = panelOffset }
                                     .drawBackdrop(
                                         backdrop = activeBackdrop,
                                         shape = { pillShape },
@@ -569,26 +751,19 @@ fun FloatingBottomBar(
                     run {
                         val maxWidthPx = with(density) { containerMaxWidth.toPx() }
                         val fullBarWidthPx = with(density) { fullBarWidth.toPx() }
-                        val focusedBarWidthPx = with(density) { focusedBarWidth.toPx() }
                         val barWidthPx = with(density) { barWidth.toPx() }
                         val actionGapPx = with(density) { actionGap.toPx() }
                         val actionWidthPx = with(density) { actionWidth.toPx() }
                         val collapsedActionWidthPx = with(density) { collapsedActionWidth.toPx() }
-                        val expandedActionWidthPx = with(density) { expandedActionWidth.toPx() }
                         val compactPaddingPx = with(density) { CompactBarPadding.toPx() }
                         val fullTabWidthPx = ((fullBarWidthPx - compactPaddingPx * 2f) / tabsCount).coerceAtLeast(0f)
-                        val focusMorphProgress = FastOutSlowInEasing.transform(sideActionProgress.coerceIn(0f, 1f))
                         val fullTabWidthDp = with(density) { fullTabWidthPx.toDp() }
-                        val focusShellWidth = lerpDp(fullTabWidthDp, focusedBarWidth, focusMorphProgress)
-                        val focusShellHeight = lerpDp(CompactBarIndicatorHeight, FocusedBarSize, focusMorphProgress)
-                        val focusWidth = lerpDp(fullTabWidthDp, FocusedBarIndicatorHeight, focusMorphProgress)
-                        val focusHeight = lerpDp(CompactBarIndicatorHeight, FocusedBarIndicatorHeight, focusMorphProgress)
-                        val focusShellWidthPx = with(density) { focusShellWidth.toPx() }
-                        val focusWidthPx = with(density) { focusWidth.toPx() }
-                        val focusedRowWidthPx = focusedBarWidthPx + actionGapPx + expandedActionWidthPx
+                        val focusShellHeight = CompactBarIndicatorHeight
+                        val focusHeight = CompactBarIndicatorHeight
+                        val focusShellWidthPx = with(density) { fullTabWidthDp.toPx() }
+                        val focusWidthPx = with(density) { fullTabWidthDp.toPx() }
                         val fullRowWidthPx = fullBarWidthPx + actionGapPx + collapsedActionWidthPx
                         val currentRowWidthPx = barWidthPx + actionGapPx + actionWidthPx
-                        val focusedRowStartX = (maxWidthPx - focusedRowWidthPx) / 2f
                         val fullRowStartX = (maxWidthPx - fullRowWidthPx) / 2f
                         val currentRowStartX = (maxWidthPx - currentRowWidthPx) / 2f
                         val focusValue = if (focusTransitionActive) latestSelectedTarget.toFloat() else dampedDrag.value
@@ -602,139 +777,87 @@ fun FloatingBottomBar(
                         } else {
                             fullRowStartX + fullRowWidthPx - fullBarWidthPx + normalLocalCenterX
                         }
-                        val focusedGlobalCenterX = if (isLtr) {
-                            focusedRowStartX + focusedBarWidthPx / 2f
-                        } else {
-                            focusedRowStartX + focusedRowWidthPx - focusedBarWidthPx / 2f
-                        }
-                        val focusCenterX = lerp(normalGlobalCenterX, focusedGlobalCenterX, focusMorphProgress) -
-                            currentRowStartX + panelOffset * (1f - focusMorphProgress)
+                        val focusCenterX = normalGlobalCenterX - currentRowStartX + panelOffset
                         val focusBaseCenterX = if (isLtr) focusShellWidthPx / 2f else barWidthPx - focusShellWidthPx / 2f
                         val focusTranslationX = focusCenterX - focusBaseCenterX
                         val focusLensBaseCenterX = if (isLtr) focusWidthPx / 2f else barWidthPx - focusWidthPx / 2f
                         val focusLensTranslationX = focusCenterX - focusLensBaseCenterX
-                        val focusPressProgress = (
-                            dampedDrag.pressProgress * (1f - focusMorphProgress) +
-                                focusedActionPress.pressProgress * focusMorphProgress
-                            ).coerceIn(0f, 1f)
-                        val focusPressedScale = with(density) {
-                            FocusPressedIndicatorHeight.toPx() / CompactBarIndicatorHeight.toPx().coerceAtLeast(1f)
-                        }
-                        val focusedActionScale = lerp(1f, focusPressedScale, focusedActionPress.pressProgress * focusMorphProgress)
-                        val focusVelocity = dampedDrag.velocity / 10f * (1f - focusMorphProgress)
+                        val focusVelocity = if (expandedFocusVisible) dampedDrag.velocity / 10f else 0f
                         val focusScaleX =
-                            lerp(dampedDrag.scaleX, 1f, focusMorphProgress) * focusedActionScale /
+                            dampedDrag.scaleX /
                                 (1f - (focusVelocity * 0.75f).coerceIn(-0.2f, 0.2f))
                         val focusScaleY =
-                            lerp(dampedDrag.scaleY, 1f, focusMorphProgress) * focusedActionScale *
+                            dampedDrag.scaleY *
                                 (1f - (focusVelocity * 0.25f).coerceIn(-0.2f, 0.2f))
-                        val barShadowAlpha = FloatingBarShadowAlpha +
-                            FloatingBarPressedShadowAlphaExtra * focusPressProgress
 
-                        Box(
-                            modifier = Modifier
-                                .zIndex(-1f)
-                                .width(barWidth)
-                                .height(barHeight)
-                                .floatingBarShadow(pillShape, barShadowAlpha),
-                        )
-
-                        if (combinedBackdrop != null) {
-                            if (focusMorphProgress > 0.01f) {
+                        if (focusedTabBackdrop != null) {
+                            if (expandedFocusVisible) {
+                                Box(
+                                    modifier = Modifier
+                                        .graphicsLayer { translationX = focusLensTranslationX }
+                                        .then(interactiveHighlight.gestureModifier)
+                                        .then(dampedDrag.modifier)
+                                        .drawBackdrop(
+                                            backdrop = focusedTabBackdrop,
+                                            shape = { pillShape },
+                                            effects = {
+                                                lens(
+                                                    refractionHeight = 10.dp.toPx() * focusPressProgress,
+                                                    refractionAmount = 14.dp.toPx() * focusPressProgress,
+                                                    depthEffect = true,
+                                                    chromaticAberration = 0.5f,
+                                                )
+                                            },
+                                            highlight = { pillHighlight.copy(alpha = focusPressProgress) },
+                                            layerBlock = {
+                                                scaleX = focusScaleX
+                                                scaleY = focusScaleY
+                                            },
+                                            onDrawSurface = {
+                                                drawRect(
+                                                    color = if (!isDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
+                                                    alpha = 1f - focusPressProgress,
+                                                )
+                                                drawRect(Color.Black.copy(alpha = 0.03f * focusPressProgress))
+                                            },
+                                        )
+                                        .innerShadow(shape = pillShape) {
+                                            InnerShadow(
+                                                radius = 8.dp * focusPressProgress,
+                                                color = Color.Black.copy(alpha = 0.15f),
+                                                alpha = focusPressProgress,
+                                            )
+                                        }
+                                        .height(focusHeight)
+                                        .width(fullTabWidthDp),
+                                )
+                            }
+                        } else {
+                            if (expandedFocusVisible) {
                                 Box(
                                     modifier = Modifier
                                         .offset { IntOffset(focusTranslationX.roundToInt(), 0) }
-                                        .drawBackdrop(
-                                            backdrop = activeBackdrop,
-                                            shape = { pillShape },
-                                            effects = {
-                                                vibrancy()
-                                                blur(4.dp.toPx(), 4.dp.toPx())
-                                                lens(
-                                                    refractionHeight = 24.dp.toPx(),
-                                                    refractionAmount = 24.dp.toPx(),
-                                                )
-                                            },
-                                            highlight = { baseHighlight.copy(alpha = 0.75f * focusMorphProgress) },
-                                            onDrawSurface = {
-                                                drawRect(
-                                                    containerColor.copy(
-                                                        alpha = containerColor.alpha * focusMorphProgress,
-                                                    ),
-                                                )
-                                            },
-                                        )
+                                        .then(dampedDrag.modifier)
                                         .height(focusShellHeight)
-                                        .width(focusShellWidth),
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .graphicsLayer { translationX = focusLensTranslationX }
-                                    .then(if (!focusTransitionActive) interactiveHighlight.gestureModifier else Modifier)
-                                    .then(if (!focusTransitionActive) dampedDrag.modifier else Modifier)
-                                    .drawBackdrop(
-                                        backdrop = combinedBackdrop,
-                                        shape = { pillShape },
-                                        effects = {
-                                            lens(
-                                                refractionHeight = 10.dp.toPx() * focusPressProgress,
-                                                refractionAmount = 14.dp.toPx() * focusPressProgress,
-                                                depthEffect = true,
-                                                chromaticAberration = 0.5f,
-                                            )
-                                        },
-                                        highlight = { pillHighlight.copy(alpha = focusPressProgress) },
-                                        layerBlock = {
-                                            scaleX = focusScaleX
-                                            scaleY = focusScaleY
-                                        },
-                                        onDrawSurface = {
-                                            drawRect(
-                                                color = if (!isDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
-                                                alpha = 1f - focusPressProgress,
-                                            )
-                                            drawRect(Color.Black.copy(alpha = 0.03f * focusPressProgress))
-                                        },
-                                    )
-                                    .innerShadow(shape = pillShape) {
-                                        InnerShadow(
-                                            radius = 8.dp * focusPressProgress,
-                                            color = Color.Black.copy(alpha = 0.15f),
-                                            alpha = focusPressProgress,
-                                        )
-                                    }
-                                    .height(focusHeight)
-                                    .width(focusWidth),
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .offset { IntOffset(focusTranslationX.roundToInt(), 0) }
-                                    .then(if (!focusTransitionActive) dampedDrag.modifier else Modifier)
-                                    .background(containerColor.copy(alpha = focusMorphProgress), pillShape)
-                                    .height(focusShellHeight)
-                                    .width(focusShellWidth),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .graphicsLayer {
-                                            scaleX = focusScaleX
-                                            scaleY = focusScaleY
-                                        }
-                                        .clip(pillShape)
-                                        .background(accentColor.copy(alpha = 0.15f), pillShape)
-                                        .height(focusHeight)
-                                        .width(focusWidth),
-                                    contentAlignment = Alignment.CenterStart,
+                                        .width(fullTabWidthDp),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    if (focusMorphProgress < 0.99f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .graphicsLayer {
+                                                scaleX = focusScaleX
+                                                scaleY = focusScaleY
+                                            }
+                                            .clip(pillShape)
+                                            .background(accentColor.copy(alpha = 0.15f), pillShape)
+                                            .height(focusHeight)
+                                            .width(fullTabWidthDp),
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) {
                                         CompositionLocalProvider(LocalContentColor provides accentColor) {
                                             Row(
                                                 modifier = Modifier
                                                     .clearAndSetSemantics {}
-                                                    .alpha(1f - focusMorphProgress)
                                                     .wrapContentWidth(align = Alignment.Start, unbounded = true)
                                                     .requiredWidth(fullBarWidth - CompactBarPadding * 2f)
                                                     .height(CompactBarIndicatorHeight)
@@ -812,16 +935,37 @@ fun FloatingBottomBar(
                 }
 
                 sideAction?.let { action ->
-                    FloatingBottomSideActionButton(
-                        action = action,
-                        activeBackdrop = activeBackdrop,
-                        capturedBackdrop = if (activeBackdrop != null) sideActionBackdrop else null,
-                        containerColor = containerColor,
-                        contentColor = tabContentColor,
-                        width = actionWidth,
-                        height = barHeight,
-                        expansionProgress = sideActionProgress,
-                    )
+                    Box(
+                        modifier = Modifier
+                            .width(actionWidth)
+                            .height(barHeight),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (activeBackdrop != null) {
+                            FloatingBottomSideActionBackdropLayer(
+                                action = action,
+                                backdrop = sideActionBackdrop,
+                                activeBackdrop = activeBackdrop,
+                                containerColor = containerColor,
+                                contentColor = tabContentColor,
+                                width = actionWidth,
+                                height = barHeight,
+                                expansionProgress = sideActionProgress,
+                                pressProgress = sideActionPress.pressProgress,
+                            )
+                        }
+                        FloatingBottomSideActionButton(
+                            action = action,
+                            activeBackdrop = activeBackdrop,
+                            containerColor = containerColor,
+                            contentColor = tabContentColor,
+                            width = actionWidth,
+                            height = barHeight,
+                            expansionProgress = sideActionProgress,
+                            sideActionPress = sideActionPress,
+                        )
+                    }
+                }
                 }
             }
         }
@@ -829,42 +973,49 @@ fun FloatingBottomBar(
 }
 
 @Composable
-private fun FloatingBottomSideActionButton(
+private fun FloatingBottomSideActionBackdropLayer(
     action: FloatingBottomBarAction,
-    activeBackdrop: LayerBackdrop?,
-    capturedBackdrop: LayerBackdrop?,
+    backdrop: LayerBackdrop,
+    activeBackdrop: LayerBackdrop,
     containerColor: Color,
     contentColor: Color,
     width: Dp,
     height: Dp,
     expansionProgress: Float,
+    pressProgress: Float,
 ) {
-    val shape = CircleShape
-    val baseHighlight = rememberIosIndicatorHighlight(extraDegrees = -45f)
-    val animationScope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val sideActionPress = remember(animationScope) {
-        DampedDragAnimation(
-            animationScope = animationScope,
-            initialValue = 0f,
-            valueRange = 0f..1f,
-            visibilityThreshold = 0.001f,
-            initialScale = 1f,
-            pressedScale = 1f,
-            pressProgressAnimationSpec = spring(0.7f, 450f, 0.001f),
-            onDragStarted = {},
-            onDragStopped = {},
-            onDrag = { _, _ -> },
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(height)
+            .clearAndSetSemantics {}
+            .alpha(0f)
+            .layerBackdrop(backdrop),
+        contentAlignment = Alignment.Center,
+    ) {
+        FloatingBottomSideActionSurface(
+            action = action,
+            activeBackdrop = activeBackdrop,
+            containerColor = containerColor,
+            contentColor = contentColor,
+            expansionProgress = expansionProgress,
+            pressProgress = pressProgress,
         )
     }
+}
+
+@Composable
+private fun FloatingBottomSideActionButton(
+    action: FloatingBottomBarAction,
+    activeBackdrop: LayerBackdrop?,
+    containerColor: Color,
+    contentColor: Color,
+    width: Dp,
+    height: Dp,
+    expansionProgress: Float,
+    sideActionPress: DampedDragAnimation,
+) {
     val pressProgress = sideActionPress.pressProgress
-    val pressScale = lerp(78f / 64f, 1.06f, expansionProgress)
-    val collapsedContentAlpha = (1f - expansionProgress).coerceIn(0f, 1f)
-    val expandedContentAlpha = expansionProgress.coerceIn(0f, 1f)
-    val collapsedContentOffsetX = with(density) { (-8).dp.toPx() * expansionProgress }
-    val expandedContentOffsetX = with(density) { 8.dp.toPx() * (1f - expansionProgress) }
-    val selectedOption = action.options.firstOrNull { it.selected } ?: action.options.firstOrNull()
-    val expandedText = selectedOption?.label ?: action.label
     val parentClick = if (action.expanded && action.options.isNotEmpty()) {
         action.options.firstOrNull { !it.selected }?.onClick ?: action.onClick
     } else {
@@ -875,8 +1026,6 @@ private fun FloatingBottomSideActionButton(
         modifier = Modifier
             .width(width)
             .height(height)
-            .zIndex(1f)
-            .then(if (capturedBackdrop != null) Modifier.layerBackdrop(capturedBackdrop) else Modifier)
             .then(sideActionPress.modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -886,129 +1035,147 @@ private fun FloatingBottomSideActionButton(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        val buttonScale = lerp(1f, pressScale, pressProgress)
-
-        Box(
-            modifier = Modifier
-                .width(width * buttonScale)
-                .height(height * buttonScale)
-                .floatingBarShadow(
-                    shape = shape,
-                    alpha = FloatingBarShadowAlpha + FloatingBarPressedShadowAlphaExtra * pressProgress,
-                ),
+        FloatingBottomSideActionSurface(
+            action = action,
+            activeBackdrop = activeBackdrop,
+            containerColor = containerColor,
+            contentColor = contentColor,
+            expansionProgress = expansionProgress,
+            pressProgress = pressProgress,
         )
+    }
+}
 
-        Box(
+@Composable
+private fun FloatingBottomSideActionSurface(
+    action: FloatingBottomBarAction,
+    activeBackdrop: LayerBackdrop?,
+    containerColor: Color,
+    contentColor: Color,
+    expansionProgress: Float,
+    pressProgress: Float,
+) {
+    val shape = CircleShape
+    val baseHighlight = rememberIosIndicatorHighlight(extraDegrees = -45f)
+    val density = LocalDensity.current
+    val collapsedContentAlpha = (1f - expansionProgress).coerceIn(0f, 1f)
+    val expandedContentAlpha = expansionProgress.coerceIn(0f, 1f)
+    val collapsedContentOffsetX = with(density) { (-8).dp.toPx() * expansionProgress }
+    val expandedContentOffsetX = with(density) { 8.dp.toPx() * (1f - expansionProgress) }
+    val selectedOption = action.options.firstOrNull { it.selected } ?: action.options.firstOrNull()
+    val expandedText = selectedOption?.label ?: action.label
+    val buttonScale = sideActionButtonScale(expansionProgress, pressProgress)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .graphicsLayer {
+                scaleX = buttonScale
+                scaleY = buttonScale
+            }
+            .clip(shape)
+            .then(
+                if (activeBackdrop != null) {
+                    Modifier.drawBackdrop(
+                        backdrop = activeBackdrop,
+                        shape = { shape },
+                        effects = {
+                            vibrancy()
+                            blur(4.dp.toPx(), 4.dp.toPx())
+                            lens(
+                                refractionHeight = 24.dp.toPx(),
+                                refractionAmount = 24.dp.toPx(),
+                            )
+                        },
+                        highlight = { baseHighlight.copy(alpha = 0.75f) },
+                        onDrawSurface = { drawRect(containerColor) },
+                    )
+                } else {
+                    Modifier.background(containerColor, shape)
+                },
+            )
+            .then(
+                if (activeBackdrop == null) {
+                    Modifier.innerShadow(shape = shape) {
+                        InnerShadow(
+                            radius = 8.dp * pressProgress,
+                            color = Color.Black.copy(alpha = 0.15f),
+                            alpha = pressProgress,
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
                 .graphicsLayer {
-                    scaleX = buttonScale
-                    scaleY = buttonScale
-                }
-                .clip(shape)
-                .then(
-                    if (activeBackdrop != null) {
-                        Modifier.drawBackdrop(
-                            backdrop = activeBackdrop,
-                            shape = { shape },
-                            effects = {
-                                vibrancy()
-                                blur(4.dp.toPx(), 4.dp.toPx())
-                                lens(
-                                    refractionHeight = 24.dp.toPx(),
-                                    refractionAmount = 24.dp.toPx(),
-                                )
-                            },
-                            highlight = { baseHighlight.copy(alpha = 0.75f) },
-                            onDrawSurface = { drawRect(containerColor) },
-                        )
-                    } else {
-                        Modifier.background(containerColor, shape)
-                    },
-                )
-                .then(
-                    if (activeBackdrop == null) {
-                        Modifier.innerShadow(shape = shape) {
-                            InnerShadow(
-                                radius = 8.dp * pressProgress,
-                                color = Color.Black.copy(alpha = 0.15f),
-                                alpha = pressProgress,
-                            )
-                        }
-                    } else {
-                        Modifier
-                    },
-            ),
-            contentAlignment = Alignment.Center,
+                    alpha = collapsedContentAlpha
+                    translationX = collapsedContentOffsetX
+                    val contentScale = lerp(1f, 0.96f, expansionProgress)
+                    scaleX = contentScale
+                    scaleY = contentScale
+                },
+            verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
+            horizontalAlignment = CenterHorizontally,
         ) {
-            Column(
+            Icon(
+                modifier = Modifier.size(CompactBarIconSize),
+                imageVector = action.icon,
+                contentDescription = action.contentDescription,
+                tint = contentColor,
+            )
+            action.label?.let { label ->
+                Text(
+                    text = label,
+                    color = contentColor,
+                    fontSize = CompactBarLabelSize,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (expandedText != null && expandedContentAlpha > 0.01f) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
                     .graphicsLayer {
-                        alpha = collapsedContentAlpha
-                        translationX = collapsedContentOffsetX
-                        val contentScale = lerp(1f, 0.96f, expansionProgress)
-                        scaleX = contentScale
-                        scaleY = contentScale
-                    },
-                verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
-                horizontalAlignment = CenterHorizontally,
+                        alpha = expandedContentAlpha
+                        translationX = expandedContentOffsetX
+                    }
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    modifier = Modifier.size(CompactBarIconSize),
-                    imageVector = action.icon,
-                    contentDescription = action.contentDescription,
-                    tint = contentColor,
-                )
-                action.label?.let { label ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
                     Text(
-                        text = label,
+                        text = expandedText,
                         color = contentColor,
-                        fontSize = CompactBarLabelSize,
-                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-
-            if (expandedText != null && expandedContentAlpha > 0.01f) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight()
-                        .graphicsLayer {
-                            alpha = expandedContentAlpha
-                            translationX = expandedContentOffsetX
-                        }
-                        .padding(horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        Text(
-                            text = expandedText,
-                            color = contentColor,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        modifier = Modifier.size(CompactBarIconSize),
-                        imageVector = action.icon,
-                        contentDescription = null,
-                        tint = contentColor,
-                    )
-                }
+                Icon(
+                    modifier = Modifier.size(CompactBarIconSize),
+                    imageVector = action.icon,
+                    contentDescription = null,
+                    tint = contentColor,
+                )
             }
         }
     }
@@ -1017,6 +1184,14 @@ private fun FloatingBottomSideActionButton(
 private fun lerpDp(start: Dp, stop: Dp, fraction: Float): Dp {
     val coerced = fraction.coerceIn(0f, 1f)
     return start + (stop - start) * coerced
+}
+
+private fun sideActionButtonScale(
+    expansionProgress: Float,
+    pressProgress: Float,
+): Float {
+    val pressScale = lerp(78f / 64f, 1.06f, expansionProgress)
+    return lerp(1f, pressScale, pressProgress)
 }
 
 private fun Modifier.floatingBarShadow(
